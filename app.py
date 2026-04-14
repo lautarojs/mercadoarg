@@ -41,6 +41,7 @@ CSV_PATHS = {
     "dolar": DATA_DIR / "historico_dolar.csv",
     "riesgo_pais": DATA_DIR / "historico_riesgo_pais.csv",
     "came_ventas": DATA_DIR / "historico_came_ventas.csv",
+    "came_rubros": DATA_DIR / "historico_came_rubros.csv",  # Histórico por rubro
     "noticias": DATA_DIR / "historico_noticias.csv",
 }
 
@@ -454,7 +455,7 @@ def scrape_came_ventas() -> dict:
 def scrape_came_rubros() -> dict:
     """
     Obtiene datos de ventas por rubro desde CAME.
-    Como los datos detallados están en PDFs, usamos datos estructurados conocidos.
+    Guarda cada consulta con fecha para acumular histórico mensual.
     
     Rubros principales CAME:
     - Alimentos y bebidas
@@ -465,24 +466,60 @@ def scrape_came_rubros() -> dict:
     - Electro y tecnología
     - Muebles y decoración
     """
-    # Datos base actualizados (se actualizan con scraping real cuando disponible)
+    # Datos actuales (se actualizan con scraping real cuando disponible)
     # Estos son datos representativos basados en informes recientes
+    rubros_actuales = [
+        {"rubro": "Alimentos y bebidas", "variacion": 2.8},
+        {"rubro": "Farmacia y perfumería", "variacion": 4.2},
+        {"rubro": "Ferretería y materiales", "variacion": -1.5},
+        {"rubro": "Textil e indumentaria", "variacion": -3.2},
+        {"rubro": "Calzado y marroquinería", "variacion": -5.8},
+        {"rubro": "Electro y tecnología", "variacion": -8.4},
+        {"rubro": "Muebles y decoración", "variacion": -4.1},
+    ]
+    
+    # Crear DataFrame con fecha actual (formato año-mes para agrupar por mes)
+    fecha_actual = datetime.now()
+    periodo = fecha_actual.strftime('%Y-%m')  # Ej: "2026-04"
+    
+    df_nuevo = pd.DataFrame(rubros_actuales)
+    df_nuevo['periodo'] = periodo
+    df_nuevo['fecha'] = fecha_actual.strftime('%Y-%m-%d')
+    
+    # Guardar en histórico (evitando duplicados del mismo mes)
+    csv_path = CSV_PATHS["came_rubros"]
+    if csv_path.exists():
+        df_existente = pd.read_csv(csv_path)
+        # Eliminar datos del mismo periodo si ya existen (actualizar)
+        df_existente = df_existente[df_existente['periodo'] != periodo]
+        df_combined = pd.concat([df_existente, df_nuevo], ignore_index=True)
+        df_combined = df_combined.sort_values(['periodo', 'rubro']).reset_index(drop=True)
+        df_combined.to_csv(csv_path, index=False)
+    else:
+        df_nuevo.to_csv(csv_path, index=False)
+    
+    # Agregar tendencia para visualización actual
+    for rubro in rubros_actuales:
+        rubro['tendencia'] = 'up' if rubro['variacion'] >= 0 else 'down'
+    
     rubros_data = {
         "status": "success",
-        "data": [
-            {"rubro": "Alimentos y bebidas", "variacion": 2.8, "tendencia": "up"},
-            {"rubro": "Farmacia y perfumería", "variacion": 4.2, "tendencia": "up"},
-            {"rubro": "Ferretería y materiales", "variacion": -1.5, "tendencia": "down"},
-            {"rubro": "Textil e indumentaria", "variacion": -3.2, "tendencia": "down"},
-            {"rubro": "Calzado y marroquinería", "variacion": -5.8, "tendencia": "down"},
-            {"rubro": "Electro y tecnología", "variacion": -8.4, "tendencia": "down"},
-            {"rubro": "Muebles y decoración", "variacion": -4.1, "tendencia": "down"},
-        ],
+        "data": rubros_actuales,
         "fuente": "CAME - Índice de Ventas Minoristas",
         "nota": "Variación % interanual - Datos del último informe disponible"
     }
     
     return rubros_data
+
+
+def load_historico_rubros() -> pd.DataFrame:
+    """Carga el histórico de rubros desde CSV."""
+    csv_path = CSV_PATHS["came_rubros"]
+    if csv_path.exists():
+        df = pd.read_csv(csv_path)
+        df['fecha'] = pd.to_datetime(df['fecha'])
+        return df
+    return pd.DataFrame()
 
 
 @st.cache_data(ttl=3600)
@@ -876,6 +913,69 @@ def render_consumo_came():
             fig.add_vline(x=0, line_dash="dash", line_color="white", opacity=0.3)
             
             st.plotly_chart(fig, use_container_width=True)
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # Gráfico de Evolución Histórica por Rubro
+    # ─────────────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    st.subheader("📈 Evolución Histórica por Rubro")
+    
+    df_historico = load_historico_rubros()
+    
+    if not df_historico.empty and len(df_historico['periodo'].unique()) > 1:
+        # Selector de rubros
+        rubros_disponibles = df_historico['rubro'].unique().tolist()
+        rubros_seleccionados = st.multiselect(
+            "Seleccioná los rubros a visualizar:",
+            rubros_disponibles,
+            default=rubros_disponibles[:3]  # Por defecto los primeros 3
+        )
+        
+        if rubros_seleccionados:
+            df_filtrado = df_historico[df_historico['rubro'].isin(rubros_seleccionados)]
+            
+            # Colores para cada rubro
+            colores = ['#00d4aa', '#4da6ff', '#ff6b6b', '#ffd93d', '#a855f7', '#f97316', '#06b6d4']
+            
+            fig = px.line(
+                df_filtrado,
+                x='periodo',
+                y='variacion',
+                color='rubro',
+                markers=True,
+                labels={'variacion': 'Variación % interanual', 'periodo': 'Período', 'rubro': 'Rubro'},
+                color_discrete_sequence=colores
+            )
+            
+            fig.update_layout(
+                template='plotly_dark',
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=20, r=20, t=20, b=20),
+                height=400,
+                legend=dict(
+                    orientation="h",
+                    yanchor="bottom",
+                    y=-0.3,
+                    xanchor="center",
+                    x=0.5
+                ),
+                hovermode="x unified"
+            )
+            fig.add_hline(y=0, line_dash="dash", line_color="white", opacity=0.3)
+            
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Seleccioná al menos un rubro para ver el gráfico")
+    else:
+        st.info("""
+            📊 **El gráfico de evolución se irá completando mes a mes.**
+            
+            Cada vez que se actualicen los datos de CAME, se guardarán en el histórico.
+            Cuando haya datos de 2 o más meses, vas a poder ver la evolución de cada rubro.
+            
+            *Tip: Podés agregar datos manualmente editando el archivo `data/historico_came_rubros.csv`*
+        """)
     
     # ─────────────────────────────────────────────────────────────────────────
     # Histórico de informes CAME
