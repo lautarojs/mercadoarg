@@ -1,0 +1,20 @@
+# Monitor de Mercado AR - Dependencies
+# =====================================
+
+# Web Framework
+streamlit>=1.30.0
+
+# Data Processing
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Visualization
+plotly>=5.18.0
+
+# Web Scraping & HTTP
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# Date handling
+python-dateutil>=2.8.0
